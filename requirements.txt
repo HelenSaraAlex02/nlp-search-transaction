@@ -1,0 +1,18 @@
+# Core ML
+sentence-transformers==2.7.0
+torch==2.2.2
+
+# Vector DB
+chromadb==0.3.29
+onnxruntime
+
+# Data
+pandas==2.2.2
+numpy==1.26.4
+faker==24.9.0
+
+# MLflow
+mlflow==2.12.2
+
+# App
+streamlit==1.33.0
