@@ -59,9 +59,6 @@ for key, default in [
         st.session_state[key] = default
 
 
-# ─────────────────────────────────────────────────────────────
-# Search Logic
-# ─────────────────────────────────────────────────────────────
 def run_search(query: str):
     query = query.strip()
     if not query:
@@ -69,7 +66,6 @@ def run_search(query: str):
 
     t0 = time.time()
 
-    # 👇 Pass dynamic k to backend
     results, filters = hybrid_search(
         query,
         top_k=st.session_state.k
@@ -93,10 +89,21 @@ def run_search(query: str):
     run_id = None
     if mlflow_enabled:
         try:
+            from app.config import EMBEDDING_MODEL
+
+            embedding_dim = 384
+            manual_score = st.session_state.get("manual_score", None)
+
             with mlflow.start_run(run_name=f"search: {query[:40]}") as run:
+
                 mlflow.log_param("query", query)
                 mlflow.log_param("filters", str(filters))
                 mlflow.log_param("k", st.session_state.k)
+                mlflow.log_param("embedding_model", EMBEDDING_MODEL)
+                mlflow.log_param("vector_db", "chromadb")
+                mlflow.log_param("embedding_dim", embedding_dim)
+                mlflow.log_param("num_transactions", len(df))
+
                 mlflow.log_metric("latency_ms", latency_ms)
                 mlflow.log_metric("num_results", len(raw_results))
 
@@ -104,10 +111,18 @@ def run_search(query: str):
                     avg_sim = sum(r["similarity"] for r in raw_results) / len(raw_results)
                     mlflow.log_metric("avg_similarity", round(avg_sim, 2))
 
-                run_id = run.info.run_id
-        except Exception:
-            pass
+                if manual_score is not None:
+                    mlflow.log_metric("manual_relevance_score", manual_score)
 
+                from app.retrieval import collection
+                mlflow.log_metric("index_size", collection.count())
+
+                run_id = run.info.run_id
+
+        except Exception as e:
+            print("MLflow logging error:", e)
+
+    # ───────────────── Update Session State ─────────────────
     st.session_state.results = raw_results
     st.session_state.filters = filters
     st.session_state.mlflow_run_id = run_id
