@@ -19,9 +19,7 @@ def load_or_generate(filepath=DATA_PATH, num_rows=5000):
     df = generate_synthetic_transactions(num_rows)
     df.to_csv(filepath, index=False)
     return df
-# ============================================================
-# Configuration Constants
-# ============================================================
+
 
 COUNTRIES = ["US", "UK", "IN", "DE", "AE", "BH", "QA"]
 
