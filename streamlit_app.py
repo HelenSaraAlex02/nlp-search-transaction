@@ -43,10 +43,8 @@ def initialize():
 
 df = initialize()
 
+# ───────────────── Session State Initialization ─────────────────
 
-# ─────────────────────────────────────────────────────────────
-# Session State Initialization
-# ─────────────────────────────────────────────────────────────
 for key, default in [
     ("searched", False),
     ("results", []),
@@ -60,12 +58,14 @@ for key, default in [
 
 
 def run_search(query: str):
+
     query = query.strip()
     if not query:
         return
 
     t0 = time.time()
 
+    # Run hybrid search with user-selected k
     results, filters = hybrid_search(
         query,
         top_k=st.session_state.k
@@ -75,8 +75,11 @@ def run_search(query: str):
     distances = results["distances"][0] if results.get("distances") else []
 
     raw_results = []
+
     for i, (doc, dist) in enumerate(zip(documents, distances)):
+
         similarity = round((1 - dist) * 100, 2)
+
         raw_results.append({
             "rank": i + 1,
             "similarity": similarity,
@@ -86,16 +89,23 @@ def run_search(query: str):
     latency_ms = round((time.time() - t0) * 1000, 2)
 
     # ───────────────── MLflow Logging ─────────────────
+
     run_id = None
+
     if mlflow_enabled:
         try:
             from app.config import EMBEDDING_MODEL
+            from app.retrieval import collection
+
+            import json
+            import pandas as pd
 
             embedding_dim = 384
             manual_score = st.session_state.get("manual_score", None)
 
             with mlflow.start_run(run_name=f"search: {query[:40]}") as run:
 
+                # ───── Parameters ─────
                 mlflow.log_param("query", query)
                 mlflow.log_param("filters", str(filters))
                 mlflow.log_param("k", st.session_state.k)
@@ -104,6 +114,7 @@ def run_search(query: str):
                 mlflow.log_param("embedding_dim", embedding_dim)
                 mlflow.log_param("num_transactions", len(df))
 
+                # ───── Metrics ─────
                 mlflow.log_metric("latency_ms", latency_ms)
                 mlflow.log_metric("num_results", len(raw_results))
 
@@ -114,8 +125,26 @@ def run_search(query: str):
                 if manual_score is not None:
                     mlflow.log_metric("manual_relevance_score", manual_score)
 
-                from app.retrieval import collection
                 mlflow.log_metric("index_size", collection.count())
+
+                # ───── Artifacts (Results) ─────
+
+                # Save JSON results
+                results_json = {
+                    "query": query,
+                    "k": st.session_state.k,
+                    "filters": filters,
+                    "results": raw_results
+                }
+
+                mlflow.log_dict(results_json, "search_results.json")
+
+                # Save CSV results
+                df_results = pd.DataFrame(raw_results)
+                csv_path = "search_results.csv"
+                df_results.to_csv(csv_path, index=False)
+
+                mlflow.log_artifact(csv_path)
 
                 run_id = run.info.run_id
 
@@ -123,6 +152,7 @@ def run_search(query: str):
             print("MLflow logging error:", e)
 
     # ───────────────── Update Session State ─────────────────
+
     st.session_state.results = raw_results
     st.session_state.filters = filters
     st.session_state.mlflow_run_id = run_id
