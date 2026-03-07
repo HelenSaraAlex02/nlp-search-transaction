@@ -1,16 +1,14 @@
-# streamlit_app.py
-
 import streamlit as st
 import time
-import os
 
 from app.data_generator import load_or_generate
 from app.retrieval import index_data, hybrid_search
 from app.config import MLFLOW_TRACKING_URI
+from app.config import MLFLOW_UI_URI
 
 
 # ─────────────────────────────────────────────────────────────
-# Page Config (MUST be first Streamlit command)
+# Page Config
 # ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Semantic Transaction Search",
@@ -18,6 +16,7 @@ st.set_page_config(
     layout="centered",
     initial_sidebar_state="collapsed",
 )
+
 
 # ─────────────────────────────────────────────────────────────
 # MLflow Setup
@@ -33,30 +32,36 @@ except Exception:
 
 
 # ─────────────────────────────────────────────────────────────
-# Initialize Data (Cached)
+# Initialize Data
 # ─────────────────────────────────────────────────────────────
-@st.cache_resource(show_spinner="Loading data and building index... (first run takes ~2 min)")
+@st.cache_resource(show_spinner="Initializing transaction search engine...")
 def initialize():
     df = load_or_generate("data/synthetic_transactions.csv", 5000)
     index_data(df)
     return df
 
+
 df = initialize()
 
-# ───────────────── Session State Initialization ─────────────────
 
+# ─────────────────────────────────────────────────────────────
+# Session State Initialization
+# ─────────────────────────────────────────────────────────────
 for key, default in [
     ("searched", False),
     ("results", []),
     ("filters", None),
     ("mlflow_run_id", None),
     ("latency_ms", None),
-    ("k", 5),  # Default k
+    ("k", 5),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
 
 
+# ─────────────────────────────────────────────────────────────
+# Search Logic
+# ─────────────────────────────────────────────────────────────
 def run_search(query: str):
 
     query = query.strip()
@@ -65,7 +70,6 @@ def run_search(query: str):
 
     t0 = time.time()
 
-    # Run hybrid search with user-selected k
     results, filters = hybrid_search(
         query,
         top_k=st.session_state.k
@@ -77,7 +81,6 @@ def run_search(query: str):
     raw_results = []
 
     for i, (doc, dist) in enumerate(zip(documents, distances)):
-
         similarity = round((1 - dist) * 100, 2)
 
         raw_results.append({
@@ -88,6 +91,7 @@ def run_search(query: str):
 
     latency_ms = round((time.time() - t0) * 1000, 2)
 
+
     # ───────────────── MLflow Logging ─────────────────
 
     run_id = None
@@ -97,15 +101,13 @@ def run_search(query: str):
             from app.config import EMBEDDING_MODEL
             from app.retrieval import collection
 
-            import json
-            import pandas as pd
-
             embedding_dim = 384
             manual_score = st.session_state.get("manual_score", None)
 
-            with mlflow.start_run(run_name=f"search: {query[:40]}") as run:
+            run_name = f"query: {query[:50]}"
+            with mlflow.start_run(run_name=run_name, nested=True) as run:
 
-                # ───── Parameters ─────
+                # Parameters
                 mlflow.log_param("query", query)
                 mlflow.log_param("filters", str(filters))
                 mlflow.log_param("k", st.session_state.k)
@@ -114,7 +116,7 @@ def run_search(query: str):
                 mlflow.log_param("embedding_dim", embedding_dim)
                 mlflow.log_param("num_transactions", len(df))
 
-                # ───── Metrics ─────
+                # Metrics
                 mlflow.log_metric("latency_ms", latency_ms)
                 mlflow.log_metric("num_results", len(raw_results))
 
@@ -127,29 +129,11 @@ def run_search(query: str):
 
                 mlflow.log_metric("index_size", collection.count())
 
-                # ───── Artifacts (Results) ─────
-
-                # Save JSON results
-                results_json = {
-                    "query": query,
-                    "k": st.session_state.k,
-                    "filters": filters,
-                    "results": raw_results
-                }
-
-                mlflow.log_dict(results_json, "search_results.json")
-
-                # Save CSV results
-                df_results = pd.DataFrame(raw_results)
-                csv_path = "search_results.csv"
-                df_results.to_csv(csv_path, index=False)
-
-                mlflow.log_artifact(csv_path)
-
                 run_id = run.info.run_id
 
         except Exception as e:
             print("MLflow logging error:", e)
+
 
     # ───────────────── Update Session State ─────────────────
 
@@ -170,7 +154,7 @@ def do_search():
 st.title("🔍 Semantic Transaction Search")
 st.caption("Ask a financial question and see results ranked by semantic relevance.")
 
-# Query input
+
 st.text_input(
     "Search query",
     key="search_input",
@@ -178,7 +162,7 @@ st.text_input(
     placeholder="e.g. high-value SWIFT transactions to India above 20000",
 )
 
-# 👇 K selector (max 15)
+
 st.slider(
     "Number of results (k)",
     min_value=1,
@@ -187,7 +171,9 @@ st.slider(
     key="k"
 )
 
+
 col1, col2 = st.columns([1, 4])
+
 with col1:
     if st.button("Search 🔍", use_container_width=True):
         do_search()
@@ -197,6 +183,7 @@ with col1:
 # Results
 # ─────────────────────────────────────────────────────────────
 if st.session_state.searched:
+
     if st.session_state.results:
 
         status_parts = [
@@ -208,7 +195,9 @@ if st.session_state.searched:
             status_parts.append("📊 MLflow run logged")
 
         st.success("  |  ".join(status_parts))
-
+        # Show MLflow link
+        if st.session_state.mlflow_run_id:
+            st.markdown(f"🔗 [Open MLflow UI]({MLFLOW_UI_URI})")
         st.write("### Results")
 
         for r in st.session_state.results:
@@ -223,9 +212,10 @@ if st.session_state.searched:
 
 
 # ─────────────────────────────────────────────────────────────
-# Sidebar Example Queries
+# Sidebar
 # ─────────────────────────────────────────────────────────────
 with st.sidebar:
+
     st.header("💡 Example Queries")
 
     examples = [

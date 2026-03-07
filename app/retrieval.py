@@ -2,12 +2,15 @@
 
 import chromadb
 from chromadb.config import Settings
+
 from .embedding import embed_text
 from .config import CHROMA_PATH
 from .filters import extract_filters
 
+
 # ============================================================
-# Initialize Chroma Client (0.3.29 API - uses DuckDB, no SQLite issue)
+# Initialize Chroma Client
+# (Chroma 0.3.29 → DuckDB backend)
 # ============================================================
 
 client = chromadb.Client(
@@ -24,23 +27,45 @@ collection = client.get_or_create_collection(
 )
 
 
-def is_collection_empty():
-    return collection.count() == 0
+# ============================================================
+# Utility
+# ============================================================
 
+def index_exists():
+    """
+    Check if embeddings already exist in the collection.
+    Prevents rebuilding the index every Streamlit reload.
+    """
+    try:
+        return collection.count() > 0
+    except Exception:
+        return False
+
+
+# ============================================================
+# Index Data
+# ============================================================
 
 def index_data(df):
-    """Index transactions into ChromaDB. Runs only if collection is empty."""
+    """
+    Index transactions into ChromaDB.
 
-    if not is_collection_empty():
+    Runs ONLY if the collection is empty.
+    Prevents rebuilding embeddings every app restart.
+    """
+
+    if index_exists():
         return
 
     documents = df["text_description"].tolist()
     ids = df["transaction_id"].astype(str).tolist()
+
+    # Generate embeddings once
     embeddings = embed_text(documents)
 
-    metadatas = []
-    for _, row in df.iterrows():
-        metadatas.append({
+    # Build metadata
+    metadatas = [
+        {
             "transaction_type": row["transaction_type"],
             "payment_rail": row["payment_rail"],
             "status": row["status"],
@@ -51,7 +76,9 @@ def index_data(df):
             "amount": float(row["amount"]),
             "currency": row["currency"],
             "date": int(row["date"].timestamp())
-        })
+        }
+        for _, row in df.iterrows()
+    ]
 
     collection.add(
         documents=documents,
@@ -60,16 +87,26 @@ def index_data(df):
         metadatas=metadatas
     )
 
-    client.persist()  # Required in 0.3.x to save to disk
+    # Persist to disk
+    client.persist()
 
+
+# ============================================================
+# Hybrid Search
+# ============================================================
 
 def hybrid_search(query, top_k=5):
-    """Hybrid search: metadata filters + semantic ANN."""
+    """
+    Hybrid Search:
+    - Metadata filtering
+    - Semantic similarity search
+    """
 
-    # Safety clamp (UI protection)
+    # Safety clamp (avoid huge queries)
     top_k = max(1, min(int(top_k), 15))
 
     filters = extract_filters(query)
+
     query_embedding = embed_text([query])
 
     results = collection.query(

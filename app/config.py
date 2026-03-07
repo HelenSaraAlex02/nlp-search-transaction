@@ -6,4 +6,5 @@ CHROMA_PATH = "./chroma_data"
 # MLflow: use environment variable with fallback to localhost for local dev
 
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://localhost:5000")
+MLFLOW_UI_URI = os.getenv("MLFLOW_UI_URI", "http://localhost:5000")
 DATA_PATH = os.path.join("data", "synthetic_transactions.csv")

@@ -18,6 +18,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.9.2
     container_name: nlp-transaction-search-mlflow
@@ -25,16 +26,20 @@ services:
       - "5000:5000"
     volumes:
       - ./mlruns:/mlflow/mlruns
+
     command: >
       mlflow server
       --host 0.0.0.0
       --port 5000
-      --backend-store-uri /mlflow/mlruns
+      --backend-store-uri file:/mlflow/mlruns
       --default-artifact-root /mlflow/mlruns
+      --workers 1
+
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000')"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s
+
     restart: unless-stopped

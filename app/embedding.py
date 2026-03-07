@@ -24,7 +24,7 @@ def get_model():
 # Embed Text Function
 # ============================================================
 
-def embed_text(texts, batch_size=64):
+def embed_text(texts, batch_size=128):
     """
     Converts list of texts into normalized embeddings.
     """
